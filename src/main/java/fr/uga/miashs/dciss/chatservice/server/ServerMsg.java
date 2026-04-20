@@ -49,7 +49,7 @@ public class ServerMsg {
 		nextUserId = new AtomicInteger(1);
 		nextGroupId = new AtomicInteger(-1);
 		sp = new ServerPacketProcessor(this);
-		executor = Executors.newWorkStealingPool();
+         executor = Executors.newCachedThreadPool();
 	}
 	
 	public GroupMsg createGroup(int ownerId) {
@@ -128,7 +128,8 @@ public class ServerMsg {
 				// une pour envoyer des messages au client
 				// les deux boucles sont gérées au niveau de la classe UserMsg
 				UserMsg x = users.get(userId);
-				if (x.open(s)) {
+				
+				if (x != null && x.open(s)) {
 					LOG.info(userId + " connected");
 					// lancement boucle de reception
 					executor.submit(() -> x.receiveLoop());
