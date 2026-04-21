@@ -19,8 +19,9 @@ import java.util.logging.Logger;
 import fr.uga.miashs.dciss.chatservice.common.Packet;
 
 import java.util.*;
+import java.io.Serializable;
 
-public class UserMsg implements PacketProcessor{
+public class UserMsg implements PacketProcessor, Serializable {
 	private final static Logger LOG = Logger.getLogger(UserMsg.class.getName());
 	
 	private int userId;

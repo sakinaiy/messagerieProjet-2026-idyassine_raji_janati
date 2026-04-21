@@ -36,6 +36,7 @@ public class ClientMsg {
     private DataInputStream dis;
 
     private int identifier;
+    private DatabaseManager db;
 
     private List<MessageListener> mListeners;
     private List<ConnectionListener> cListeners;
@@ -108,7 +109,6 @@ public class ClientMsg {
      * Method to be called to establish the connection.
      *
      * @throws UnknownHostException
-     * @throws IOException
      */
     public void startSession() throws UnknownHostException {
         if (s == null || s.isClosed()) {
@@ -120,6 +120,9 @@ public class ClientMsg {
                 dos.flush();
                 if (identifier == 0) {
                     identifier = dis.readInt();
+                    db = new DatabaseManager(identifier);
+                } else {
+                    db = new DatabaseManager(identifier);
                 }
                 // start the receive loop
                 new Thread(() -> receiveLoop()).start();
@@ -303,6 +306,28 @@ public class ClientMsg {
                 int length = dis.readInt();
                 byte[] data = new byte[length];
                 dis.readFully(data);
+
+                // sauvegarder selon le type de paquet
+                if (data.length > 0) {
+                    byte type = data[0];
+                    if (type == 0x20) { // message texte
+                        int msgLength = ((data[1] & 0xFF) << 24) | ((data[2] & 0xFF) << 16) |
+                                        ((data[3] & 0xFF) << 8) | (data[4] & 0xFF);
+                        String content = new String(data, 5, msgLength, "UTF-8");
+                        db.saveMessage(sender, dest, content);
+                    } else if (type == 0x21) { // fichier
+                        int nameLength = ((data[1] & 0xFF) << 24) | ((data[2] & 0xFF) << 16) |
+                                         ((data[3] & 0xFF) << 8) | (data[4] & 0xFF);
+                        String fileName = new String(data, 5, nameLength, "UTF-8");
+                        int dataStart = 5 + nameLength + 4;
+                        byte[] fileData = new byte[data.length - dataStart];
+                        System.arraycopy(data, dataStart, fileData, 0, fileData.length);
+                        String filePath = "received_" + fileName;
+                        java.nio.file.Files.write(java.nio.file.Paths.get(filePath), fileData);
+                        db.saveFile(sender, fileName, filePath);
+                    }
+                }
+
                 notifyMessageListeners(new Packet(sender, dest, data));
             }
         } catch (IOException e) {
@@ -317,6 +342,7 @@ public class ClientMsg {
                 s.close();
         } catch (IOException e) {
         }
+        if (db != null) db.close();
         s = null;
         notifyConnectionListeners(false);
     }
@@ -342,6 +368,7 @@ public class ClientMsg {
                 System.out.println("2 - Creer un groupe");
                 System.out.println("3 - Envoyer un fichier");
                 System.out.println("4 - Quitter un groupe");
+                System.out.println("5 - Voir historique messages");
                 int choix = Integer.parseInt(sc.nextLine());
 
                 if (choix == 1) {
@@ -368,13 +395,15 @@ public class ClientMsg {
                     String path = sc.nextLine();
                     File f = new File(path);
                     byte[] fileData = java.nio.file.Files.readAllBytes(f.toPath());
-
                     c.sendFile(dest, f.getName(), fileData);
 
                 } else if (choix == 4) {
                     System.out.println("Id du groupe a quitter ?");
                     int groupId = Integer.parseInt(sc.nextLine());
                     c.leaveGroup(groupId);
+
+                } else if (choix == 5) {
+                    c.db.printMessages();
                 }
 
             } catch (InputMismatchException | NumberFormatException e) {

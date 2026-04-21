@@ -13,8 +13,9 @@ package fr.uga.miashs.dciss.chatservice.server;
 import java.util.*;
 import java.util.concurrent.ConcurrentSkipListSet;
 import fr.uga.miashs.dciss.chatservice.common.Packet;
+import java.io.Serializable;
 
-public class GroupMsg implements PacketProcessor {
+public class GroupMsg implements PacketProcessor, Serializable {
 // test test 
     private int groupId;
     private UserMsg owner;
