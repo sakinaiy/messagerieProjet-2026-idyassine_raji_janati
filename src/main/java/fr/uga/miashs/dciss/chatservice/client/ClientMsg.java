@@ -350,10 +350,7 @@ public class ClientMsg {
     public static void main(String[] args) throws UnknownHostException, IOException, InterruptedException {
         ClientMsg c = new ClientMsg("localhost", 1666);
 
-        // add a dummy listener that print the content of message as a string
         c.addMessageListener(p -> System.out.println(p.srcId + " says to " + p.destId + ": " + new String(p.data)));
-
-        // add a connection listener that exit application when connection closed
         c.addConnectionListener(active -> { if (!active) System.exit(0); });
 
         c.startSession();
@@ -369,37 +366,37 @@ public class ClientMsg {
                 System.out.println("3 - Envoyer un fichier");
                 System.out.println("4 - Quitter un groupe");
                 System.out.println("5 - Voir historique messages");
-                int choix = Integer.parseInt(sc.nextLine());
+                int choix = Integer.parseInt(sc.next());
 
                 if (choix == 1) {
                     System.out.println("A qui voulez vous ecrire ?");
-                    int dest = Integer.parseInt(sc.nextLine());
+                    int dest = Integer.parseInt(sc.next());
                     System.out.println("Votre message ?");
-                    lu = sc.nextLine();
+                    lu = sc.next();
                     c.sendTextMessage(dest, lu);
 
                 } else if (choix == 2) {
                     System.out.println("Combien de membres ?");
-                    int nb = Integer.parseInt(sc.nextLine());
+                    int nb = Integer.parseInt(sc.next());
                     int[] members = new int[nb];
                     for (int i = 0; i < nb; i++) {
                         System.out.println("Id du membre " + (i + 1) + " ?");
-                        members[i] = Integer.parseInt(sc.nextLine());
+                        members[i] = Integer.parseInt(sc.next());
                     }
                     c.createGroup(members);
 
                 } else if (choix == 3) {
                     System.out.println("A qui voulez vous envoyer le fichier ?");
-                    int dest = Integer.parseInt(sc.nextLine());
+                    int dest = Integer.parseInt(sc.next());
                     System.out.println("Chemin du fichier ?");
-                    String path = sc.nextLine();
+                    String path = sc.next();
                     File f = new File(path);
                     byte[] fileData = java.nio.file.Files.readAllBytes(f.toPath());
                     c.sendFile(dest, f.getName(), fileData);
 
                 } else if (choix == 4) {
                     System.out.println("Id du groupe a quitter ?");
-                    int groupId = Integer.parseInt(sc.nextLine());
+                    int groupId = Integer.parseInt(sc.next());
                     c.leaveGroup(groupId);
 
                 } else if (choix == 5) {
@@ -412,5 +409,4 @@ public class ClientMsg {
         }
 
         c.closeSession();
-    }
-}
+    }}
