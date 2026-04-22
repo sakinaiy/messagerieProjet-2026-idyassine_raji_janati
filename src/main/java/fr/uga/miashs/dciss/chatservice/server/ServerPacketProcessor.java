@@ -42,8 +42,22 @@ public class ServerPacketProcessor implements PacketProcessor {
         } else if (type == 0x30) { // changement de pseudo (ajouté)
             updateNickname(p.srcId, buf, p.data);
         } else {
-            LOG.warning("Server message of type=" + type + " not handled by procesor");
+            sendError(p.srcId, "Type de message inconnu : " + type);
+            LOG.warning("Server message of type=" + type + " not handled by processor");
         }
+    }
+
+    /**
+     * Envoie une notification d'erreur au client (Type 0x10)
+     */
+    private void sendError(int userId, String message) {
+        byte[] msgBytes = message.getBytes(StandardCharsets.UTF_8);
+        ByteBuffer response = ByteBuffer.allocate(1 + msgBytes.length);
+        response.put((byte) 0x10); // Code pour les erreurs
+        response.put(msgBytes);
+        
+        // On envoie le paquet (srcId 0 = Serveur)
+        server.processPacket(new Packet(0, userId, response.array()));
     }
 
     public void createGroup(int ownerId, ByteBuffer data) {
@@ -58,10 +72,12 @@ public class ServerPacketProcessor implements PacketProcessor {
         int groupId = data.getInt();
         GroupMsg g = server.getGroup(groupId);
         if (g == null) {
+            sendError(ownerId, "Le groupe " + groupId + " n'existe pas.");
             LOG.warning("Group " + groupId + " not found");
             return;
         }
         if (g.getOwner() != ownerId) {
+            sendError(ownerId, "Action refusee : vous n'etes pas le proprietaire du groupe " + groupId);
             LOG.warning("User " + ownerId + " is not owner of group " + groupId);
             return;
         }
@@ -73,6 +89,7 @@ public class ServerPacketProcessor implements PacketProcessor {
         int userId = data.getInt();
         GroupMsg g = server.getGroup(groupId);
         if (g == null) {
+            sendError(ownerId, "Impossible d'ajouter : le groupe " + groupId + " n'existe pas.");
             LOG.warning("Group " + groupId + " not found");
             return;
         }
@@ -84,6 +101,7 @@ public class ServerPacketProcessor implements PacketProcessor {
         int userId = data.getInt();
         GroupMsg g = server.getGroup(groupId);
         if (g == null) {
+            sendError(ownerId, "Impossible de retirer : le groupe " + groupId + " n'existe pas.");
             LOG.warning("Group " + groupId + " not found");
             return;
         }
@@ -94,6 +112,7 @@ public class ServerPacketProcessor implements PacketProcessor {
         int groupId = data.getInt();
         GroupMsg g = server.getGroup(groupId);
         if (g == null) {
+            sendError(userId, "Impossible de quitter : le groupe " + groupId + " n'existe pas.");
             LOG.warning("Group " + groupId + " not found");
             return;
         }
