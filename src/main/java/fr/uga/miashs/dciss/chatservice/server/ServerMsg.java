@@ -101,6 +101,16 @@ public class ServerMsg {
         }
     }
 
+    
+    // envoie un paquet à tous les utilisateurs connectés
+    public void broadcast(Packet p) {
+        for (UserMsg user : users.values()) {
+            if (user.isConnected()) {
+                user.process(p);
+            }
+        }
+    }
+
     /**
      * Sauvegarde les utilisateurs et groupes dans un fichier
      */

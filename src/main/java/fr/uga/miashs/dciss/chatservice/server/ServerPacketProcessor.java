@@ -133,7 +133,7 @@ public class ServerPacketProcessor implements PacketProcessor {
             user.setNickname(nickname);
             LOG.info("User " + userId + " changed nickname to: " + nickname);
             
-            // On crée un paquet pour l'envoyer au broadcast
+            // On diffuse le changement de pseudo à TOUT LE MONDE
             server.broadcast(new Packet(userId, 0, originalData));
         }
     }
