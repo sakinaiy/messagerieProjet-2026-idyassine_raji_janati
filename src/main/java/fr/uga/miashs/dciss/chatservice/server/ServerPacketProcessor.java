@@ -11,6 +11,7 @@
 package fr.uga.miashs.dciss.chatservice.server;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.logging.Logger;
 import fr.uga.miashs.dciss.chatservice.common.Packet;
 
@@ -38,9 +39,25 @@ public class ServerPacketProcessor implements PacketProcessor {
             removeMember(p.srcId, buf);
         } else if (type == 5) { // quitter un groupe
             leaveGroup(p.srcId, buf);
+        } else if (type == 0x30) { // changement de pseudo (ajouté)
+            updateNickname(p.srcId, buf, p.data);
         } else {
-            LOG.warning("Server message of type=" + type + " not handled by procesor");
+            sendError(p.srcId, "Type de message inconnu : " + type);
+            LOG.warning("Server message of type=" + type + " not handled by processor");
         }
+    }
+
+    /**
+     * Envoie une notification d'erreur au client (Type 0x10)
+     */
+    private void sendError(int userId, String message) {
+        byte[] msgBytes = message.getBytes(StandardCharsets.UTF_8);
+        ByteBuffer response = ByteBuffer.allocate(1 + msgBytes.length);
+        response.put((byte) 0x10); // Code pour les erreurs
+        response.put(msgBytes);
+        
+        // On envoie le paquet (srcId 0 = Serveur)
+        server.processPacket(new Packet(0, userId, response.array()));
     }
 
     public void createGroup(int ownerId, ByteBuffer data) {
@@ -55,10 +72,12 @@ public class ServerPacketProcessor implements PacketProcessor {
         int groupId = data.getInt();
         GroupMsg g = server.getGroup(groupId);
         if (g == null) {
+            sendError(ownerId, "Le groupe " + groupId + " n'existe pas.");
             LOG.warning("Group " + groupId + " not found");
             return;
         }
         if (g.getOwner() != ownerId) {
+            sendError(ownerId, "Action refusee : vous n'etes pas le proprietaire du groupe " + groupId);
             LOG.warning("User " + ownerId + " is not owner of group " + groupId);
             return;
         }
@@ -70,6 +89,7 @@ public class ServerPacketProcessor implements PacketProcessor {
         int userId = data.getInt();
         GroupMsg g = server.getGroup(groupId);
         if (g == null) {
+            sendError(ownerId, "Impossible d'ajouter : le groupe " + groupId + " n'existe pas.");
             LOG.warning("Group " + groupId + " not found");
             return;
         }
@@ -81,6 +101,7 @@ public class ServerPacketProcessor implements PacketProcessor {
         int userId = data.getInt();
         GroupMsg g = server.getGroup(groupId);
         if (g == null) {
+            sendError(ownerId, "Impossible de retirer : le groupe " + groupId + " n'existe pas.");
             LOG.warning("Group " + groupId + " not found");
             return;
         }
@@ -91,9 +112,29 @@ public class ServerPacketProcessor implements PacketProcessor {
         int groupId = data.getInt();
         GroupMsg g = server.getGroup(groupId);
         if (g == null) {
+            sendError(userId, "Impossible de quitter : le groupe " + groupId + " n'existe pas.");
             LOG.warning("Group " + groupId + " not found");
             return;
         }
         g.removeMember(server.getUser(userId));
+    }
+
+    /**
+     * Gère la mise à jour du pseudo et le diffuse aux autres clients
+     */
+    public void updateNickname(int userId, ByteBuffer buf, byte[] originalData) {
+        int length = buf.getInt();
+        byte[] nickBytes = new byte[length];
+        buf.get(nickBytes);
+        String nickname = new String(nickBytes, StandardCharsets.UTF_8);
+
+        UserMsg user = server.getUser(userId);
+        if (user != null) {
+            user.setNickname(nickname);
+            LOG.info("User " + userId + " changed nickname to: " + nickname);
+            
+            // On diffuse l'information à tout le monde pour mettre à jour les contacts
+            server.broadcast(userId, 0, originalData);
+        }
     }
 }

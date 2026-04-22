@@ -19,12 +19,7 @@ import java.util.*;
 import fr.uga.miashs.dciss.chatservice.common.Packet;
 
 /**
- * Manages the connection to a ServerMsg. Method startSession() is used to
- * establish the connection. Then messages can be send by a call to sendPacket.
- * The reception is done asynchronously (internally by the method receiveLoop())
- * and the reception of a message is notified to MessagesListeners. To register
- * a MessageListener, the method addMessageListener has to be called. Session
- * are closed thanks to the method closeSession().
+ * Manages the connection to a ServerMsg.
  */
 public class ClientMsg {
 
@@ -36,24 +31,43 @@ public class ClientMsg {
     private DataInputStream dis;
 
     private int identifier;
-    private DatabaseManager db;
 
     private List<MessageListener> mListeners;
     private List<ConnectionListener> cListeners;
 
+    // --- AJOUT POUR LA RECONNEXION ---
+    private static final String ID_FILE = "client_id.txt";
+
     /**
-     * Create a client with an existing id, that will connect to the server at the
-     * given address and port
-     *
-     * @param id      The client id
-     * @param address The server address or hostname
-     * @param port    The port number
+     * Sauvegarde l'ID dans un fichier local pour permettre la reconnexion
      */
+    private void saveIdToFile(int id) {
+        try (PrintWriter out = new PrintWriter(new FileWriter(ID_FILE))) {
+            out.print(id);
+        } catch (IOException e) {
+            System.err.println("Erreur sauvegarde ID : " + e.getMessage());
+        }
+    }
+
+    /**
+     * Lit l'ID depuis le fichier local s'il existe
+     */
+    public static int loadIdFromFile() {
+        File f = new File(ID_FILE);
+        if (f.exists()) {
+            try (Scanner scanner = new Scanner(f)) {
+                if (scanner.hasNextInt()) return scanner.nextInt();
+            } catch (IOException e) {
+                System.err.println("Erreur lecture fichier ID");
+            }
+        }
+        return 0; // 0 signifie qu'aucun ID n'est connu
+    }
+    // ---------------------------------
+
     public ClientMsg(int id, String address, int port) {
-        if (id < 0)
-            throw new IllegalArgumentException("id must not be less than 0");
-        if (port <= 0)
-            throw new IllegalArgumentException("Server port must be greater than 0");
+        if (id < 0) throw new IllegalArgumentException("id must not be less than 0");
+        if (port <= 0) throw new IllegalArgumentException("Server port must be greater than 0");
         serverAddress = address;
         serverPort = port;
         identifier = id;
@@ -61,40 +75,20 @@ public class ClientMsg {
         cListeners = new ArrayList<>();
     }
 
-    /**
-     * Create a client without id, the server will provide an id during the
-     * session start
-     *
-     * @param address The server address or hostname
-     * @param port    The port number
-     */
     public ClientMsg(String address, int port) {
         this(0, address, port);
     }
 
-    /**
-     * Register a MessageListener to the client. It will be notified each time a
-     * message is received.
-     *
-     * @param l
-     */
     public void addMessageListener(MessageListener l) {
-        if (l != null)
-            mListeners.add(l);
+        if (l != null) mListeners.add(l);
     }
 
     protected void notifyMessageListeners(Packet p) {
         mListeners.forEach(x -> x.messageReceived(p));
     }
 
-    /**
-     * Register a ConnectionListener to the client. It will be notified if the connection start or ends.
-     *
-     * @param l
-     */
     public void addConnectionListener(ConnectionListener l) {
-        if (l != null)
-            cListeners.add(l);
+        if (l != null) cListeners.add(l);
     }
 
     protected void notifyConnectionListeners(boolean active) {
@@ -106,9 +100,7 @@ public class ClientMsg {
     }
 
     /**
-     * Method to be called to establish the connection.
-     *
-     * @throws UnknownHostException
+     * Modifié pour gérer la sauvegarde automatique de l'ID lors de la première connexion
      */
     public void startSession() throws UnknownHostException {
         if (s == null || s.isClosed()) {
@@ -116,15 +108,18 @@ public class ClientMsg {
                 s = new Socket(serverAddress, serverPort);
                 dos = new DataOutputStream(s.getOutputStream());
                 dis = new DataInputStream(s.getInputStream());
+                
+                // Envoi de l'ID (soit 0 pour nouveau, soit l'ID chargé du fichier)
                 dos.writeInt(identifier);
                 dos.flush();
+
                 if (identifier == 0) {
+                    // Si on n'avait pas d'ID, le serveur nous en donne un nouveau
                     identifier = dis.readInt();
-                    db = new DatabaseManager(identifier);
-                } else {
-                    db = new DatabaseManager(identifier);
+                    // On le sauvegarde pour les prochaines sessions
+                    saveIdToFile(identifier);
                 }
-                // start the receive loop
+
                 new Thread(() -> receiveLoop()).start();
                 notifyConnectionListeners(true);
             } catch (IOException e) {
@@ -134,12 +129,6 @@ public class ClientMsg {
         }
     }
 
-    /**
-     * Send a packet to the specified destination (either a userId or groupId)
-     *
-     * @param destId the destination id
-     * @param data   the data to be sent
-     */
     public void sendPacket(int destId, byte[] data) {
         try {
             synchronized (dos) {
@@ -154,150 +143,25 @@ public class ClientMsg {
     }
 
     /**
-     * Envoie un message texte à un utilisateur ou un groupe
-     *
-     * @param destId  l'id du destinataire
-     * @param message le texte du message
+     * Envoie une demande de changement de pseudo au serveur (Type 0x30)
      */
-    public void sendTextMessage(int destId, String message) {
+    public void sendNickname(String nickname) {
         try {
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            DataOutputStream d = new DataOutputStream(bos);
-            d.writeByte(0x20); // type message texte
-            byte[] msgBytes = message.getBytes("UTF-8");
-            d.writeInt(msgBytes.length);
-            d.write(msgBytes);
-            d.flush();
-            sendPacket(destId, bos.toByteArray());
+            byte[] nickBytes = nickname.getBytes("UTF-8");
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            DataOutputStream tmpDos = new DataOutputStream(baos);
+            
+            tmpDos.writeByte(0x30); // Code d'action pour le pseudo
+            tmpDos.writeInt(nickBytes.length);
+            tmpDos.write(nickBytes);
+            
+            // Envoi au serveur (destination ID 0)
+            sendPacket(0, baos.toByteArray());
         } catch (IOException e) {
-            e.printStackTrace();
+            System.err.println("Erreur lors de l'envoi du pseudo : " + e.getMessage());
         }
     }
 
-    /**
-     * Envoie un fichier à un utilisateur ou un groupe
-     *
-     * @param destId   l'id du destinataire
-     * @param fileName le nom du fichier
-     * @param fileData les octets du fichier
-     */
-    public void sendFile(int destId, String fileName, byte[] fileData) {
-        try {
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            DataOutputStream d = new DataOutputStream(bos);
-            d.writeByte(0x21); // type envoi fichier
-            byte[] nameBytes = fileName.getBytes("UTF-8");
-            d.writeInt(nameBytes.length);
-            d.write(nameBytes);
-            d.writeInt(fileData.length);
-            d.write(fileData);
-            d.flush();
-            sendPacket(destId, bos.toByteArray());
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    /**
-     * Crée un groupe avec les membres donnés
-     *
-     * @param memberIds les ids des membres
-     */
-    public void createGroup(int... memberIds) {
-        try {
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            DataOutputStream d = new DataOutputStream(bos);
-            d.writeByte(0x01); // type creation groupe
-            d.writeInt(memberIds.length);
-            for (int id : memberIds) {
-                d.writeInt(id);
-            }
-            d.flush();
-            sendPacket(0, bos.toByteArray());
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    /**
-     * Supprime un groupe
-     *
-     * @param groupId l'id du groupe
-     */
-    public void deleteGroup(int groupId) {
-        try {
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            DataOutputStream d = new DataOutputStream(bos);
-            d.writeByte(0x02); // type suppression groupe
-            d.writeInt(groupId);
-            d.flush();
-            sendPacket(0, bos.toByteArray());
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    /**
-     * Ajoute un membre à un groupe
-     *
-     * @param groupId l'id du groupe
-     * @param userId  l'id de l'utilisateur à ajouter
-     */
-    public void addMember(int groupId, int userId) {
-        try {
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            DataOutputStream d = new DataOutputStream(bos);
-            d.writeByte(0x03); // type ajout membre
-            d.writeInt(groupId);
-            d.writeInt(userId);
-            d.flush();
-            sendPacket(0, bos.toByteArray());
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    /**
-     * Retire un membre d'un groupe
-     *
-     * @param groupId l'id du groupe
-     * @param userId  l'id de l'utilisateur à retirer
-     */
-    public void removeMember(int groupId, int userId) {
-        try {
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            DataOutputStream d = new DataOutputStream(bos);
-            d.writeByte(0x04); // type retrait membre
-            d.writeInt(groupId);
-            d.writeInt(userId);
-            d.flush();
-            sendPacket(0, bos.toByteArray());
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    /**
-     * Quitter un groupe
-     *
-     * @param groupId l'id du groupe
-     */
-    public void leaveGroup(int groupId) {
-        try {
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            DataOutputStream d = new DataOutputStream(bos);
-            d.writeByte(0x05); // type quitter groupe
-            d.writeInt(groupId);
-            d.flush();
-            sendPacket(0, bos.toByteArray());
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    /**
-     * Start the receive loop. Has to be called only once.
-     */
     private void receiveLoop() {
         try {
             while (s != null && !s.isClosed()) {
@@ -306,111 +170,51 @@ public class ClientMsg {
                 int length = dis.readInt();
                 byte[] data = new byte[length];
                 dis.readFully(data);
-
-                // sauvegarder selon le type de paquet
-                if (data.length > 0) {
-                    byte type = data[0];
-                    if (type == 0x20) { // message texte
-                        int msgLength = ((data[1] & 0xFF) << 24) | ((data[2] & 0xFF) << 16) |
-                                        ((data[3] & 0xFF) << 8) | (data[4] & 0xFF);
-                        String content = new String(data, 5, msgLength, "UTF-8");
-                        db.saveMessage(sender, dest, content);
-                    } else if (type == 0x21) { // fichier
-                        int nameLength = ((data[1] & 0xFF) << 24) | ((data[2] & 0xFF) << 16) |
-                                         ((data[3] & 0xFF) << 8) | (data[4] & 0xFF);
-                        String fileName = new String(data, 5, nameLength, "UTF-8");
-                        int dataStart = 5 + nameLength + 4;
-                        byte[] fileData = new byte[data.length - dataStart];
-                        System.arraycopy(data, dataStart, fileData, 0, fileData.length);
-                        String filePath = "received_" + fileName;
-                        java.nio.file.Files.write(java.nio.file.Paths.get(filePath), fileData);
-                        db.saveFile(sender, fileName, filePath);
-                    }
-                }
-
                 notifyMessageListeners(new Packet(sender, dest, data));
             }
         } catch (IOException e) {
-            // error, connection closed
+            // connection closed
         }
         closeSession();
     }
 
     public void closeSession() {
         try {
-            if (s != null)
-                s.close();
+            if (s != null) s.close();
         } catch (IOException e) {
         }
-        if (db != null) db.close();
         s = null;
         notifyConnectionListeners(false);
     }
 
-    public static void main(String[] args) throws UnknownHostException, IOException, InterruptedException {
-        ClientMsg c = new ClientMsg("localhost", 1666);
+    public static void main(String[] args) throws UnknownHostException, IOException {
+        // Tente de charger l'ID sauvegardé avant de créer l'instance
+        int savedId = loadIdFromFile();
+        
+        ClientMsg c = new ClientMsg(savedId, "localhost", 1666);
 
-        // add a dummy listener that print the content of message as a string
-        c.addMessageListener(p -> System.out.println(p.srcId + " says to " + p.destId + ": " + new String(p.data)));
-
-        // add a connection listener that exit application when connection closed
+        c.addMessageListener(p -> System.out.println(p.srcId + " -> " + p.destId + ": " + new String(p.data)));
         c.addConnectionListener(active -> { if (!active) System.exit(0); });
 
         c.startSession();
-        System.out.println("Vous etes : " + c.getIdentifier());
+        System.out.println("Votre ID est : " + c.getIdentifier());
 
+        // Scanner pour tester l'interaction (Message et Nickname)
         Scanner sc = new Scanner(System.in);
-        String lu = null;
-        while (!("\\quit").equals(lu)) {
-            try {
-                System.out.println("Que voulez vous faire ?");
-                System.out.println("1 - Envoyer un message texte");
-                System.out.println("2 - Creer un groupe");
-                System.out.println("3 - Envoyer un fichier");
-                System.out.println("4 - Quitter un groupe");
-                System.out.println("5 - Voir historique messages");
-                int choix = Integer.parseInt(sc.nextLine());
-
-                if (choix == 1) {
-                    System.out.println("A qui voulez vous ecrire ?");
-                    int dest = Integer.parseInt(sc.nextLine());
-                    System.out.println("Votre message ?");
-                    lu = sc.nextLine();
-                    c.sendTextMessage(dest, lu);
-
-                } else if (choix == 2) {
-                    System.out.println("Combien de membres ?");
-                    int nb = Integer.parseInt(sc.nextLine());
-                    int[] members = new int[nb];
-                    for (int i = 0; i < nb; i++) {
-                        System.out.println("Id du membre " + (i + 1) + " ?");
-                        members[i] = Integer.parseInt(sc.nextLine());
-                    }
-                    c.createGroup(members);
-
-                } else if (choix == 3) {
-                    System.out.println("A qui voulez vous envoyer le fichier ?");
-                    int dest = Integer.parseInt(sc.nextLine());
-                    System.out.println("Chemin du fichier ?");
-                    String path = sc.nextLine();
-                    File f = new File(path);
-                    byte[] fileData = java.nio.file.Files.readAllBytes(f.toPath());
-                    c.sendFile(dest, f.getName(), fileData);
-
-                } else if (choix == 4) {
-                    System.out.println("Id du groupe a quitter ?");
-                    int groupId = Integer.parseInt(sc.nextLine());
-                    c.leaveGroup(groupId);
-
-                } else if (choix == 5) {
-                    c.db.printMessages();
+        System.out.println("Commandes disponibles : 'nick [pseudo]' ou 'msg [id] [texte]'");
+        
+        while(sc.hasNextLine()) {
+            String line = sc.nextLine();
+            if (line.startsWith("nick ")) {
+                c.sendNickname(line.substring(5).trim());
+                System.out.println("Demande de pseudo envoyée.");
+            } else if (line.startsWith("msg ")) {
+                // Logique simplifiée pour test
+                String[] parts = line.split(" ", 3);
+                if (parts.length == 3) {
+                    c.sendPacket(Integer.parseInt(parts[1]), parts[2].getBytes());
                 }
-
-            } catch (InputMismatchException | NumberFormatException e) {
-                System.out.println("Mauvais format");
             }
         }
-
-        c.closeSession();
     }
 }
