@@ -39,7 +39,7 @@ public class ClientMsg {
     private static final String ID_FILE = "client_id.txt";
 
     /**
-     * Sauvegarde l'ID dans un fichier local
+     * Sauvegarde l'ID dans un fichier local pour permettre la reconnexion
      */
     private void saveIdToFile(int id) {
         try (PrintWriter out = new PrintWriter(new FileWriter(ID_FILE))) {
@@ -50,7 +50,7 @@ public class ClientMsg {
     }
 
     /**
-     * Lit l'ID depuis le fichier local
+     * Lit l'ID depuis le fichier local s'il existe
      */
     public static int loadIdFromFile() {
         File f = new File(ID_FILE);
@@ -61,7 +61,7 @@ public class ClientMsg {
                 System.err.println("Erreur lecture fichier ID");
             }
         }
-        return 0;
+        return 0; // 0 signifie qu'aucun ID n'est connu
     }
     // ---------------------------------
 
@@ -100,7 +100,7 @@ public class ClientMsg {
     }
 
     /**
-     * Modifié pour gérer la sauvegarde automatique de l'ID
+     * Modifié pour gérer la sauvegarde automatique de l'ID lors de la première connexion
      */
     public void startSession() throws UnknownHostException {
         if (s == null || s.isClosed()) {
@@ -109,14 +109,14 @@ public class ClientMsg {
                 dos = new DataOutputStream(s.getOutputStream());
                 dis = new DataInputStream(s.getInputStream());
                 
-                // Envoi de l'ID (soit 0, soit l'ID chargé du fichier)
+                // Envoi de l'ID (soit 0 pour nouveau, soit l'ID chargé du fichier)
                 dos.writeInt(identifier);
                 dos.flush();
 
                 if (identifier == 0) {
-                    // Si on n'avait pas d'ID, le serveur nous en donne un
+                    // Si on n'avait pas d'ID, le serveur nous en donne un nouveau
                     identifier = dis.readInt();
-                    // On le sauvegarde tout de suite pour la prochaine fois !
+                    // On le sauvegarde pour les prochaines sessions
                     saveIdToFile(identifier);
                 }
 
@@ -139,6 +139,26 @@ public class ClientMsg {
             }
         } catch (IOException e) {
             closeSession();
+        }
+    }
+
+    /**
+     * Envoie une demande de changement de pseudo au serveur (Type 0x30)
+     */
+    public void sendNickname(String nickname) {
+        try {
+            byte[] nickBytes = nickname.getBytes("UTF-8");
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            DataOutputStream tmpDos = new DataOutputStream(baos);
+            
+            tmpDos.writeByte(0x30); // Code d'action pour le pseudo
+            tmpDos.writeInt(nickBytes.length);
+            tmpDos.write(nickBytes);
+            
+            // Envoi au serveur (destination ID 0)
+            sendPacket(0, baos.toByteArray());
+        } catch (IOException e) {
+            System.err.println("Erreur lors de l'envoi du pseudo : " + e.getMessage());
         }
     }
 
@@ -168,7 +188,7 @@ public class ClientMsg {
     }
 
     public static void main(String[] args) throws UnknownHostException, IOException {
-        // Tente de charger l'ID avant de créer le client
+        // Tente de charger l'ID sauvegardé avant de créer l'instance
         int savedId = loadIdFromFile();
         
         ClientMsg c = new ClientMsg(savedId, "localhost", 1666);
@@ -179,6 +199,22 @@ public class ClientMsg {
         c.startSession();
         System.out.println("Votre ID est : " + c.getIdentifier());
 
-        // ... le reste de ton code Scanner / boucle de messages ...
+        // Scanner pour tester l'interaction (Message et Nickname)
+        Scanner sc = new Scanner(System.in);
+        System.out.println("Commandes disponibles : 'nick [pseudo]' ou 'msg [id] [texte]'");
+        
+        while(sc.hasNextLine()) {
+            String line = sc.nextLine();
+            if (line.startsWith("nick ")) {
+                c.sendNickname(line.substring(5).trim());
+                System.out.println("Demande de pseudo envoyée.");
+            } else if (line.startsWith("msg ")) {
+                // Logique simplifiée pour test
+                String[] parts = line.split(" ", 3);
+                if (parts.length == 3) {
+                    c.sendPacket(Integer.parseInt(parts[1]), parts[2].getBytes());
+                }
+            }
+        }
     }
 }
