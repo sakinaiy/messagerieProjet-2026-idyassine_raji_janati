@@ -11,6 +11,7 @@
 package fr.uga.miashs.dciss.chatservice.server;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.logging.Logger;
 import fr.uga.miashs.dciss.chatservice.common.Packet;
 
@@ -38,6 +39,8 @@ public class ServerPacketProcessor implements PacketProcessor {
             removeMember(p.srcId, buf);
         } else if (type == 5) { // quitter un groupe
             leaveGroup(p.srcId, buf);
+        } else if (type == 0x30) { // changement de pseudo (ajouté)
+            updateNickname(p.srcId, buf, p.data);
         } else {
             LOG.warning("Server message of type=" + type + " not handled by procesor");
         }
@@ -95,5 +98,24 @@ public class ServerPacketProcessor implements PacketProcessor {
             return;
         }
         g.removeMember(server.getUser(userId));
+    }
+
+    /**
+     * Gère la mise à jour du pseudo et le diffuse aux autres clients
+     */
+    public void updateNickname(int userId, ByteBuffer buf, byte[] originalData) {
+        int length = buf.getInt();
+        byte[] nickBytes = new byte[length];
+        buf.get(nickBytes);
+        String nickname = new String(nickBytes, StandardCharsets.UTF_8);
+
+        UserMsg user = server.getUser(userId);
+        if (user != null) {
+            user.setNickname(nickname);
+            LOG.info("User " + userId + " changed nickname to: " + nickname);
+            
+            // On diffuse l'information à tout le monde pour mettre à jour les contacts
+            server.broadcast(userId, 0, originalData);
+        }
     }
 }
