@@ -14,6 +14,8 @@ package fr.uga.miashs.dciss.chatservice.client;
 import java.io.*;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 import fr.uga.miashs.dciss.chatservice.common.Packet;
@@ -193,26 +195,41 @@ public class ClientMsg {
         
         ClientMsg c = new ClientMsg(savedId, "localhost", 1666);
 
-        c.addMessageListener(p -> System.out.println(p.srcId + " -> " + p.destId + ": " + new String(p.data)));
+        // --- MISE À JOUR DU LISTENER POUR LES ERREURS ET PSEUDOS ---
+        c.addMessageListener(p -> {
+            if (p.data.length > 0) {
+                byte type = p.data[0];
+                if (type == 0x10) { // NOTIFICATION D'ERREUR
+                    String errorMsg = new String(p.data, 1, p.data.length - 1, StandardCharsets.UTF_8);
+                    System.err.println("🚨 [SERVEUR] " + errorMsg);
+                } else if (type == 0x30) { // CHANGEMENT DE PSEUDO
+                    ByteBuffer bb = ByteBuffer.wrap(p.data, 1, p.data.length - 1);
+                    int len = bb.getInt();
+                    byte[] nick = new byte[len];
+                    bb.get(nick);
+                    System.out.println("👤 L'utilisateur " + p.srcId + " est maintenant connu sous le nom : " + new String(nick, StandardCharsets.UTF_8));
+                } else { // MESSAGE CLASSIQUE
+                    System.out.println(p.srcId + " -> " + p.destId + ": " + new String(p.data));
+                }
+            }
+        });
+        
         c.addConnectionListener(active -> { if (!active) System.exit(0); });
 
         c.startSession();
         System.out.println("Votre ID est : " + c.getIdentifier());
 
-        // Scanner pour tester l'interaction (Message et Nickname)
         Scanner sc = new Scanner(System.in);
-        System.out.println("Commandes disponibles : 'nick [pseudo]' ou 'msg [id] [texte]'");
+        System.out.println("Commandes : 'nick [pseudo]' ou 'msg [id] [texte]'");
         
         while(sc.hasNextLine()) {
             String line = sc.nextLine();
             if (line.startsWith("nick ")) {
                 c.sendNickname(line.substring(5).trim());
-                System.out.println("Demande de pseudo envoyée.");
             } else if (line.startsWith("msg ")) {
-                // Logique simplifiée pour test
                 String[] parts = line.split(" ", 3);
                 if (parts.length == 3) {
-                    c.sendPacket(Integer.parseInt(parts[1]), parts[2].getBytes());
+                    c.sendPacket(Integer.parseInt(parts[1]), parts[2].getBytes(StandardCharsets.UTF_8));
                 }
             }
         }
