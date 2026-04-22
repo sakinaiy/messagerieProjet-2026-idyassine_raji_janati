@@ -27,7 +27,7 @@ public class UserMsg implements PacketProcessor, Serializable {
 	private int userId;
 	private Set<GroupMsg> groups;
 	
-	private ServerMsg server;
+	private transient ServerMsg server;
 	private transient Socket s;
 	private transient boolean active;
 	
