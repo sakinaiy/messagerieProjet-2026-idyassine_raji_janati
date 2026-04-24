@@ -1,14 +1,3 @@
-/*
- * Copyright (c) 2024.  Jerome David. Univ. Grenoble Alpes.
- * This file is part of DcissChatService.
- *
- * DcissChatService is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * DcissChatService is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along with Foobar. If not, see <https://www.gnu.org/licenses/>.
- */
-
 package fr.uga.miashs.dciss.chatservice.client;
 
 import java.io.*;
@@ -20,9 +9,6 @@ import java.util.*;
 
 import fr.uga.miashs.dciss.chatservice.common.Packet;
 
-/**
- * Manages the connection to a ServerMsg.
- */
 public class ClientMsg {
 
     private String serverAddress;
@@ -37,12 +23,8 @@ public class ClientMsg {
     private List<MessageListener> mListeners;
     private List<ConnectionListener> cListeners;
 
-    // --- AJOUT POUR LA RECONNEXION ---
     private static final String ID_FILE = "client_id.txt";
 
-    /**
-     * Sauvegarde l'ID dans un fichier local pour permettre la reconnexion
-     */
     private void saveIdToFile(int id) {
         try (PrintWriter out = new PrintWriter(new FileWriter(ID_FILE))) {
             out.print(id);
@@ -51,9 +33,6 @@ public class ClientMsg {
         }
     }
 
-    /**
-     * Lit l'ID depuis le fichier local s'il existe
-     */
     public static int loadIdFromFile() {
         File f = new File(ID_FILE);
         if (f.exists()) {
@@ -63,13 +42,13 @@ public class ClientMsg {
                 System.err.println("Erreur lecture fichier ID");
             }
         }
-        return 0; // 0 signifie qu'aucun ID n'est connu
+        return 0;
     }
-    // ---------------------------------
 
     public ClientMsg(int id, String address, int port) {
         if (id < 0) throw new IllegalArgumentException("id must not be less than 0");
         if (port <= 0) throw new IllegalArgumentException("Server port must be greater than 0");
+
         serverAddress = address;
         serverPort = port;
         identifier = id;
@@ -101,29 +80,24 @@ public class ClientMsg {
         return identifier;
     }
 
-    /**
-     * Modifié pour gérer la sauvegarde automatique de l'ID lors de la première connexion
-     */
     public void startSession() throws UnknownHostException {
         if (s == null || s.isClosed()) {
             try {
                 s = new Socket(serverAddress, serverPort);
                 dos = new DataOutputStream(s.getOutputStream());
                 dis = new DataInputStream(s.getInputStream());
-                
-                // Envoi de l'ID (soit 0 pour nouveau, soit l'ID chargé du fichier)
+
                 dos.writeInt(identifier);
                 dos.flush();
 
                 if (identifier == 0) {
-                    // Si on n'avait pas d'ID, le serveur nous en donne un nouveau
                     identifier = dis.readInt();
-                    // On le sauvegarde pour les prochaines sessions
                     saveIdToFile(identifier);
                 }
 
                 new Thread(() -> receiveLoop()).start();
                 notifyConnectionListeners(true);
+
             } catch (IOException e) {
                 e.printStackTrace();
                 closeSession();
@@ -144,23 +118,86 @@ public class ClientMsg {
         }
     }
 
-    /**
-     * Envoie une demande de changement de pseudo au serveur (Type 0x30)
-     */
     public void sendNickname(String nickname) {
         try {
-            byte[] nickBytes = nickname.getBytes("UTF-8");
+            byte[] nickBytes = nickname.getBytes(StandardCharsets.UTF_8);
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             DataOutputStream tmpDos = new DataOutputStream(baos);
-            
-            tmpDos.writeByte(0x30); // Code d'action pour le pseudo
+
+            tmpDos.writeByte(0x30);
             tmpDos.writeInt(nickBytes.length);
             tmpDos.write(nickBytes);
-            
-            // Envoi au serveur (destination ID 0)
+
             sendPacket(0, baos.toByteArray());
+
         } catch (IOException e) {
             System.err.println("Erreur lors de l'envoi du pseudo : " + e.getMessage());
+        }
+    }
+
+    public void createGroup(int... memberIds) {
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            DataOutputStream tmpDos = new DataOutputStream(baos);
+
+            tmpDos.writeByte(1);
+            tmpDos.writeInt(memberIds.length);
+
+            for (int id : memberIds) {
+                tmpDos.writeInt(id);
+            }
+
+            sendPacket(0, baos.toByteArray());
+
+        } catch (IOException e) {
+            System.err.println("Erreur création groupe : " + e.getMessage());
+        }
+    }
+
+    public void addMember(int groupId, int userId) {
+        sendGroupUserAction(3, groupId, userId);
+    }
+
+    public void removeMember(int groupId, int userId) {
+        sendGroupUserAction(4, groupId, userId);
+    }
+
+    public void leaveGroup(int groupId) {
+        sendGroupAction(5, groupId);
+    }
+
+    public void deleteGroup(int groupId) {
+        sendGroupAction(2, groupId);
+    }
+
+    private void sendGroupAction(int type, int groupId) {
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            DataOutputStream tmpDos = new DataOutputStream(baos);
+
+            tmpDos.writeByte(type);
+            tmpDos.writeInt(groupId);
+
+            sendPacket(0, baos.toByteArray());
+
+        } catch (IOException e) {
+            System.err.println("Erreur action groupe : " + e.getMessage());
+        }
+    }
+
+    private void sendGroupUserAction(int type, int groupId, int userId) {
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            DataOutputStream tmpDos = new DataOutputStream(baos);
+
+            tmpDos.writeByte(type);
+            tmpDos.writeInt(groupId);
+            tmpDos.writeInt(userId);
+
+            sendPacket(0, baos.toByteArray());
+
+        } catch (IOException e) {
+            System.err.println("Erreur action membre : " + e.getMessage());
         }
     }
 
@@ -170,13 +207,16 @@ public class ClientMsg {
                 int sender = dis.readInt();
                 int dest = dis.readInt();
                 int length = dis.readInt();
+
                 byte[] data = new byte[length];
                 dis.readFully(data);
+
                 notifyMessageListeners(new Packet(sender, dest, data));
             }
         } catch (IOException e) {
-            // connection closed
+            // connexion fermée
         }
+
         closeSession();
     }
 
@@ -185,53 +225,104 @@ public class ClientMsg {
             if (s != null) s.close();
         } catch (IOException e) {
         }
+
         s = null;
         notifyConnectionListeners(false);
     }
 
     public static void main(String[] args) throws UnknownHostException, IOException {
-        // Tente de charger l'ID sauvegardé avant de créer l'instance
-        int savedId = loadIdFromFile();
-        
+        int savedId = 0;
+
         ClientMsg c = new ClientMsg(savedId, "localhost", 1666);
 
-        // --- MISE À JOUR DU LISTENER POUR LES ERREURS ET PSEUDOS ---
         c.addMessageListener(p -> {
             if (p.data.length > 0) {
                 byte type = p.data[0];
-                if (type == 0x10) { // NOTIFICATION D'ERREUR
+
+                if (type == 0x10) {
                     String errorMsg = new String(p.data, 1, p.data.length - 1, StandardCharsets.UTF_8);
-                    System.err.println("🚨 [SERVEUR] " + errorMsg);
-                } else if (type == 0x30) { // CHANGEMENT DE PSEUDO
+                    System.err.println("[SERVEUR] " + errorMsg);
+
+                } else if (type == 0x30) {
                     ByteBuffer bb = ByteBuffer.wrap(p.data, 1, p.data.length - 1);
                     int len = bb.getInt();
+
                     byte[] nick = new byte[len];
                     bb.get(nick);
-                    System.out.println("👤 L'utilisateur " + p.srcId + " est maintenant connu sous le nom : " + new String(nick, StandardCharsets.UTF_8));
-                } else { // MESSAGE CLASSIQUE
-                    System.out.println(p.srcId + " -> " + p.destId + ": " + new String(p.data));
+
+                    System.out.println("L'utilisateur " + p.srcId + " est maintenant connu sous le nom : "
+                            + new String(nick, StandardCharsets.UTF_8));
+
+                } else {
+                    System.out.println(p.srcId + " -> " + p.destId + ": "
+                            + new String(p.data, StandardCharsets.UTF_8));
                 }
             }
         });
-        
-        c.addConnectionListener(active -> { if (!active) System.exit(0); });
+
+        c.addConnectionListener(active -> {
+            if (!active) System.exit(0);
+        });
 
         c.startSession();
+
         System.out.println("Votre ID est : " + c.getIdentifier());
+        System.out.println("Commandes :");
+        System.out.println("nick [pseudo]");
+        System.out.println("msg [id] [texte]");
+        System.out.println("group [id1] [id2] ...");
+        System.out.println("add [groupe] [id]");
+        System.out.println("remove [groupe] [id]");
+        System.out.println("leave [groupe]");
+        System.out.println("delete [groupe]");
 
         Scanner sc = new Scanner(System.in);
-        System.out.println("Commandes : 'nick [pseudo]' ou 'msg [id] [texte]'");
-        
-        while(sc.hasNextLine()) {
+
+        while (sc.hasNextLine()) {
             String line = sc.nextLine();
+
             if (line.startsWith("nick ")) {
                 c.sendNickname(line.substring(5).trim());
+
             } else if (line.startsWith("msg ")) {
                 String[] parts = line.split(" ", 3);
+
                 if (parts.length == 3) {
                     c.sendPacket(Integer.parseInt(parts[1]), parts[2].getBytes(StandardCharsets.UTF_8));
                 }
+
+            } else if (line.startsWith("group ")) {
+                String[] parts = line.split(" ");
+                int[] ids = new int[parts.length - 1];
+
+                for (int i = 1; i < parts.length; i++) {
+                    ids[i - 1] = Integer.parseInt(parts[i]);
+                }
+
+                c.createGroup(ids);
+                System.out.println("Demande de création de groupe envoyée.");
+
+            } else if (line.startsWith("add ")) {
+                String[] parts = line.split(" ");
+                c.addMember(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]));
+
+            } else if (line.startsWith("remove ")) {
+                String[] parts = line.split(" ");
+                c.removeMember(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]));
+
+            } else if (line.startsWith("leave ")) {
+                String[] parts = line.split(" ");
+                c.leaveGroup(Integer.parseInt(parts[1]));
+
+            } else if (line.startsWith("delete ")) {
+                String[] parts = line.split(" ");
+                c.deleteGroup(Integer.parseInt(parts[1]));
+
+            } else {
+                System.out.println("Commande inconnue.");
             }
         }
+
+        sc.close();
     }
 }

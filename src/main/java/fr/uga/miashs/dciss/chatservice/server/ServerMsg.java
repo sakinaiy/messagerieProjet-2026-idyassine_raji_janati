@@ -101,7 +101,6 @@ public class ServerMsg {
         }
     }
 
-    
     // envoie un paquet à tous les utilisateurs connectés
     public void broadcast(Packet p) {
         for (UserMsg user : users.values()) {
@@ -207,6 +206,20 @@ public class ServerMsg {
 
     public static void main(String[] args) throws IOException {
         ServerMsg s = new ServerMsg(1666);
+        
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> s.saveData()));
+        
+        // Thread pour arrêter proprement avec "quit"
+        new Thread(() -> {
+            Scanner sc = new Scanner(System.in);
+            while (sc.hasNextLine()) {
+                if (sc.nextLine().trim().equals("quit")) {
+                    s.stop();
+                    System.exit(0);
+                }
+            }
+        }).start();
+        
         s.start();
     }
 }

@@ -28,7 +28,7 @@ public class UserMsg implements PacketProcessor, Serializable {
     private String nickname; // --- AJOUT : Stockage du pseudo ---
     private Set<GroupMsg> groups;
     
-    private transient ServerMsg server;
+    private transient ServerMsg server ; 
     private transient Socket s;
     private transient boolean active;
     private BlockingQueue<Packet> sendQueue;
